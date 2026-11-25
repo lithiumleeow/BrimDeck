@@ -45,6 +45,7 @@
           <Grid x:Name="Compact" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
             <StackPanel x:Name="CompactRings" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <TextBlock x:Name="CompactReminders" FontSize="11" Foreground="{DynamicResource PanelPrimary}" TextTrimming="CharacterEllipsis" MaxWidth="150" Visibility="Collapsed" IsHitTestVisible="False"/>
             <StackPanel x:Name="CompactAlert" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
           </Grid>
           <!-- Pinned to the top. Its width follows the island's, before the panel's scale (MainWindow.Scale.cs). It only fades: it has no

@@ -22,7 +22,7 @@ public sealed class ConnectionVault
     [DllImport("crypt32.dll", SetLastError = true)]
     static extern bool CryptUnprotectData(ref Blob input, IntPtr description, IntPtr entropy, IntPtr reserved, IntPtr prompt, int flags, out Blob output);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
-    static byte[] Transform(byte[] bytes, bool protect)
+    internal static byte[] Transform(byte[] bytes, bool protect)
     {
         var input = new Blob { Size = bytes.Length, Data = Marshal.AllocHGlobal(Math.Max(1, bytes.Length)) };
         Blob output = default;

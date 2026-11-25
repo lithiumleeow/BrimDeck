@@ -136,6 +136,8 @@ public sealed class BridgeReader : IDisposable
             .Where(item => !item.completed).ToArray();
     }
 
+    public Task EditAsync(EditRequest request, CancellationToken cancellation) => PostAsync("v1/update", request, cancellation);
+    public Task DeleteAsync(DeleteRequest request, CancellationToken cancellation) => PostAsync("v1/delete", request, cancellation);
     public Task CreateAsync(CreateRequest request, CancellationToken cancellation) => PostAsync("v1/reminders", request, cancellation);
     public Task CompleteAsync(BridgeTodo item, CancellationToken cancellation)
     {

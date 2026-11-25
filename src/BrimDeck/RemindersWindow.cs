@@ -18,7 +18,7 @@ public partial class MainWindow
 
         if (RemindersHost.Child is null)
         {
-            var panel = new RemindersPanel(_app.Lifetime.Token);
+            var panel = new RemindersPanel(_app);
             RemindersHost.Child = panel;
             PreviewMouseDown += (_, _) => panel.DismissComposerOnOutsideClick();
         }
@@ -37,7 +37,7 @@ public partial class MainWindow
     }
 }
 
-internal sealed class RemindersPanel : Grid
+internal sealed partial class RemindersPanel : Grid
 {
     private readonly StackPanel _composer = new();
     private Button? _reveal;
@@ -63,9 +63,10 @@ internal sealed class RemindersPanel : Grid
     private CreateRequest? _pendingCreate;
     private string? _destination;
 
-    internal RemindersPanel(CancellationToken lifetime)
+    internal RemindersPanel(App app)
     {
-        _lifetime = lifetime;
+        _app = app;
+        _lifetime = app.Lifetime.Token;
         Margin = new Thickness(14, 2, 14, 8);
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition());
@@ -142,7 +143,7 @@ internal sealed class RemindersPanel : Grid
             }
             var refresh = new MenuItem { Header = "刷新" };
             refresh.Click += async (_, _) => await RunAsync(RefreshAsync);
-            OpenMenu(more, lists, refresh, Command("连接设置", () => { Toggle(settings); if (settings.IsVisible) _link.Focus(); }));
+            OpenMenu(more, lists, refresh, Command(_app.ReminderSummaryEnabled ? "隐藏胶囊摘要" : "显示胶囊摘要", _app.ToggleReminderSummary), Command("连接设置", () => { Toggle(settings); if (settings.IsVisible) _link.Focus(); }));
         };
         actions.Children.Add(more);
 
@@ -229,10 +230,16 @@ internal sealed class RemindersPanel : Grid
         }
 
         _lists.SelectionChanged += (_, _) => RenderTasks();
+        IsVisibleChanged += (_, _) => { if (IsVisible) _ = _app.PollRemindersAsync(); };
         Loaded += async (_, _) => await RunAsync(async () =>
         {
             _connection = _vault.Load();
-            if (_connection is not null) await RefreshAsync(); else settings.Visibility = Visibility.Visible;
+            if (_connection is not null)
+            {
+                if (_app.LastReminderSnapshot is { } cached && cached.Matches(_connection)) SetSnapshot(cached.Snapshot);
+                await RefreshAsync();
+            }
+            else settings.Visibility = Visibility.Visible;
         });
 
     }
@@ -264,6 +271,7 @@ internal sealed class RemindersPanel : Grid
         _connection = saved;
         _pendingCreate = null;
         _link.Clear();
+        _app.PublishReminderSnapshot(saved, snapshot);
         SetSnapshot(snapshot);
     }
 
@@ -273,7 +281,18 @@ internal sealed class RemindersPanel : Grid
     private async Task RefreshAsync()
     {
         using var reader = OpenReader();
-        SetSnapshot(await reader.ReadAsync(_lifetime));
+        try
+        {
+            var snapshot = await reader.ReadAsync(_lifetime);
+            _app.PublishReminderSnapshot(_connection!, snapshot);
+            SetSnapshot(snapshot);
+        }
+        catch (Exception ex) when (App.IsReminderConnectionError(ex) && !_lifetime.IsCancellationRequested)
+        {
+            _app.MarkReminderOffline(_connection!);
+            if (_app.LastReminderSnapshot is { } cached && cached.Matches(_connection)) SetSnapshot(cached.Snapshot);
+            throw new InvalidOperationException(_snapshot is null ? "无法连接 Mac 桥接。" : _status.Text, ex);
+        }
     }
 
     private void SetSnapshot(BridgeSnapshot snapshot)
@@ -291,6 +310,7 @@ internal sealed class RemindersPanel : Grid
         if (_snapshot is null) return;
         string? id = (_lists.SelectedItem as BridgeList)?.id;
         var tasks = _snapshot.Todos.Where(x => string.IsNullOrEmpty(id) || x.calendarId == id).ToArray();
+        _editor = null;
         _tasks.Children.Clear();
         string? previousGroup = null;
         foreach (var (group, item) in TodoOrdering.ByDate(tasks, TodoSort.Due, DateTimeOffset.Now, TimeZoneInfo.Local))
@@ -310,7 +330,7 @@ internal sealed class RemindersPanel : Grid
                 finally { complete.IsChecked = false; }
             };
             complete.ToolTip = "标记完成";
-            complete.IsEnabled = TaskWrites.CanComplete(item);
+            complete.IsEnabled = !_app.ReminderOffline && TaskWrites.CanComplete(item);
             DockPanel.SetDock(complete, Dock.Left);
             row.Children.Add(complete);
             if (!string.IsNullOrWhiteSpace(item.dueDisplay))
@@ -323,9 +343,11 @@ internal sealed class RemindersPanel : Grid
             var title = new TextBlock { Text = item.title, ToolTip = item.title, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(6, 0, 0, 0) };
             title.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary");
             row.Children.Add(title);
+            AttachTaskActions(row, title, item);
             _tasks.Children.Add(row);
         }
-        _status.Text = tasks.Length == 0 ? "没有未完成的待办" : $"{tasks.Length} 条未完成";
+        var count = tasks.Length == 0 ? "没有未完成的待办" : $"{tasks.Length} 条未完成";
+        _status.Text = _app.LastReminderSnapshot is { } sync ? $"{count} · {(_app.ReminderOffline ? "离线 · " : "")}上次同步 {sync.SyncedAt.ToLocalTime():MM-dd HH:mm}" : count;
     }
 
     private async Task CompleteAsync(BridgeTodo item)
