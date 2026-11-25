@@ -6,6 +6,8 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
+    private bool RemindersMenuOpen => (RemindersHost.Child as RemindersPanel)?.MenuOpen == true;
+
     private void Reminders_Click(object sender, RoutedEventArgs e)
     {
         if (RemindersHost.Visibility == Visibility.Visible)
@@ -30,10 +32,12 @@ public partial class MainWindow
 
 internal sealed class RemindersPanel : Grid
 {
+    private ContextMenu? _menu;
+    internal bool MenuOpen => _menu?.IsOpen == true;
     private readonly ConnectionVault _vault = App.RemindersVault;
     private readonly PasswordBox _link = new() { Margin = new Thickness(0, 4, 0, 4) };
     private readonly ComboBox _lists = new() { DisplayMemberPath = nameof(BridgeList.title), Margin = new Thickness(0, 4, 0, 4) };
-    private readonly ListBox _tasks = new() { DisplayMemberPath = nameof(BridgeTodo.title) };
+    private readonly StackPanel _tasks = new();
     private readonly TextBox _title = new();
     private readonly TextBox _due = new();
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
@@ -46,58 +50,111 @@ internal sealed class RemindersPanel : Grid
     internal RemindersPanel(CancellationToken lifetime)
     {
         _lifetime = lifetime;
-        var actions = _panel;
-        var list = new DockPanel { Margin = new Thickness(12, 4, 4, 8) };
-        DockPanel.SetDock(_lists, Dock.Top);
-        list.Children.Add(_lists);
-        list.Children.Add(_tasks);
+        Margin = new Thickness(14, 2, 14, 8);
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions.Add(new RowDefinition());
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        ColumnDefinitions.Add(new ColumnDefinition());
-        ColumnDefinitions.Add(new ColumnDefinition());
-        Children.Add(list);
-        var scroll = new ScrollViewer { Content = actions, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        SetColumn(scroll, 1);
+        var toolbar = new DockPanel { Margin = new Thickness(0, 0, 0, 5) };
+        Children.Add(toolbar);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal };
+        DockPanel.SetDock(actions, Dock.Right);
+        toolbar.Children.Add(actions);
+        var listPicker = MakeButton("全部清单 ▾");
+        listPicker.HorizontalAlignment = HorizontalAlignment.Left;
+        listPicker.Click += (_, _) =>
+        {
+            if (_lists.Items.Count == 0) return;
+            var menu = new ContextMenu { PlacementTarget = listPicker };
+            foreach (BridgeList list in _lists.Items)
+            {
+                var item = new MenuItem { Header = list.title, IsChecked = list == _lists.SelectedItem, IsCheckable = true };
+                item.Click += (_, _) => _lists.SelectedItem = list;
+                menu.Items.Add(item);
+            }
+            _menu = menu;
+            listPicker.ContextMenu = menu;
+            menu.IsOpen = true;
+        };
+        _lists.SelectionChanged += (_, _) => listPicker.Content = ((_lists.SelectedItem as BridgeList)?.title ?? "全部清单") + " ▾";
+        toolbar.Children.Add(listPicker);
+
+        var scroll = new ScrollViewer { Content = _tasks, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        SetRow(scroll, 1);
         Children.Add(scroll);
-        _status.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary");
 
-        actions.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary");
+        var footer = new StackPanel();
+        SetRow(footer, 2);
+        Children.Add(footer);
+        footer.Children.Add(_panel);
+        footer.Children.Add(_status);
+        _status.FontSize = 11;
+        _status.SetResourceReference(TextBlock.ForegroundProperty, "PanelSecondary");
 
-        _panel.Children.Add(new TextBlock { Text = "粘贴 Mac 桥接配置链接" });
-        _panel.Children.Add(_link);
-        AddButton("连接并保存", ConnectAsync);
-        AddButton("刷新", RefreshAsync);
+        var create = new DockPanel();
+        var settings = new DockPanel();
+        _panel.Children.Add(create);
+        _panel.Children.Add(settings);
+        create.Visibility = settings.Visibility = Visibility.Collapsed;
+        void Toggle(DockPanel panel)
+        {
+            var show = panel.Visibility != Visibility.Visible;
+            create.Visibility = settings.Visibility = Visibility.Collapsed;
+            if (show) panel.Visibility = Visibility.Visible;
+        }
 
+        actions.Children.Add(MakeButton("刷新", () => RunAsync(RefreshAsync)));
+        actions.Children.Add(MakeButton("＋ 新增", () => { Toggle(create); if (create.IsVisible) _title.Focus(); return Task.CompletedTask; }));
+        actions.Children.Add(MakeButton("连接", () => { Toggle(settings); if (settings.IsVisible) _link.Focus(); return Task.CompletedTask; }));
 
-        AddButton("完成选中待办", CompleteAsync);
-        _panel.Children.Add(new TextBlock { Text = "新待办标题" });
-        _panel.Children.Add(_title);
-        _panel.Children.Add(new TextBlock { Text = "到期时间（本地时间，yyyy-MM-dd HH:mm，可留空）" });
-        _panel.Children.Add(_due);
-        AddButton("新增到选中清单", CreateAsync);
-        _panel.Children.Add(_status);
+        var save = MakeButton("保存连接", () => RunAsync(async () => { await ConnectAsync(); settings.Visibility = Visibility.Collapsed; }));
+        DockPanel.SetDock(save, Dock.Right);
+        settings.Children.Add(save);
+        _link.ToolTip = "粘贴 Mac 桥接配置链接";
+        settings.Children.Add(_link);
+
+        var add = MakeButton("添加", () => RunAsync(async () => { await CreateAsync(); create.Visibility = Visibility.Collapsed; }));
+        DockPanel.SetDock(add, Dock.Right);
+        create.Children.Add(add);
+        _due.Width = 124;
+        _due.ToolTip = "到期时间，可留空 · yyyy-MM-dd HH:mm";
+        DockPanel.SetDock(_due, Dock.Right);
+        create.Children.Add(_due);
+        _title.ToolTip = "待办标题";
+        create.Children.Add(_title);
+        foreach (Control field in new Control[] { _link, _title, _due })
+        {
+            field.Height = 24;
+            field.Margin = new Thickness(2);
+            field.SetResourceReference(Control.BackgroundProperty, "PanelSwitchFill");
+            field.SetResourceReference(Control.ForegroundProperty, "PanelPrimary");
+            field.SetResourceReference(Control.BorderBrushProperty, "PanelPopupBorder");
+        }
+
         _lists.SelectionChanged += (_, _) => RenderTasks();
         Loaded += async (_, _) => await RunAsync(async () =>
         {
             _connection = _vault.Load();
-            if (_connection is not null) await RefreshAsync();
+            if (_connection is not null) await RefreshAsync(); else settings.Visibility = Visibility.Visible;
         });
 
     }
 
-    private void AddButton(string label, Func<Task> action)
+    private static Button MakeButton(string label, Func<Task>? action = null)
     {
-        var button = new Button { Content = label, Margin = new Thickness(0, 4, 0, 4) };
-        button.Click += async (_, _) => await RunAsync(action);
-        _panel.Children.Add(button);
+        var button = new Button { Content = label, Margin = new Thickness(2, 0, 2, 0) };
+        button.SetResourceReference(StyleProperty, "PanelOutlineButton");
+        if (action is not null) button.Click += async (_, _) => await action();
+        return button;
     }
 
     private async Task RunAsync(Func<Task> action)
     {
-        _panel.IsEnabled = false;
+        IsEnabled = false;
         try { await action(); }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception ex) { _status.Text = ex.Message; }
-        finally { _panel.IsEnabled = true; }
+        finally { IsEnabled = true; }
     }
 
     private async Task ConnectAsync()
@@ -137,17 +194,34 @@ internal sealed class RemindersPanel : Grid
         if (_snapshot is null) return;
         string? id = (_lists.SelectedItem as BridgeList)?.id;
         var tasks = _snapshot.Todos.Where(x => string.IsNullOrEmpty(id) || x.calendarId == id).ToArray();
-        _tasks.ItemsSource = tasks;
-        _status.Text = $"{tasks.Length} 条未完成";
+        _tasks.Children.Clear();
+        foreach (var item in tasks)
+        {
+            var row = new DockPanel { Margin = new Thickness(0, 1, 4, 1), LastChildFill = true };
+            var complete = MakeButton("○", () => RunAsync(() => CompleteAsync(item)));
+            complete.ToolTip = "标记完成";
+            complete.IsEnabled = TaskWrites.CanComplete(item);
+            DockPanel.SetDock(complete, Dock.Left);
+            row.Children.Add(complete);
+            if (!string.IsNullOrWhiteSpace(item.dueDisplay))
+            {
+                var due = new TextBlock { Text = item.dueDisplay, FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 4, 0) };
+                due.SetResourceReference(TextBlock.ForegroundProperty, "PanelSecondary");
+                DockPanel.SetDock(due, Dock.Right);
+                row.Children.Add(due);
+            }
+            var title = new TextBlock { Text = item.title, ToolTip = item.title, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(6, 0, 0, 0) };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary");
+            row.Children.Add(title);
+            _tasks.Children.Add(row);
+        }
+        _status.Text = tasks.Length == 0 ? "没有未完成的待办" : $"{tasks.Length} 条未完成";
     }
 
-    private async Task CompleteAsync()
+    private async Task CompleteAsync(BridgeTodo item)
     {
-        if (_tasks.SelectedItem is not BridgeTodo item)
-            throw new InvalidOperationException("请选择一条待办。");
         using var reader = OpenReader();
         await reader.CompleteAsync(item, _lifetime);
-        _tasks.ItemsSource = ((IEnumerable<BridgeTodo>)_tasks.ItemsSource).Where(x => x != item).ToArray();
         await RefreshAsync();
     }
 
