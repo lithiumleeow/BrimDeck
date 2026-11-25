@@ -16,7 +16,12 @@ public partial class MainWindow
             return;
         }
 
-        if (RemindersHost.Child is null) RemindersHost.Child = new RemindersPanel(_app.Lifetime.Token);
+        if (RemindersHost.Child is null)
+        {
+            var panel = new RemindersPanel(_app.Lifetime.Token);
+            RemindersHost.Child = panel;
+            PreviewMouseDown += (_, _) => panel.DismissComposerOnOutsideClick();
+        }
         RemindersHost.Visibility = Visibility.Visible;
         PageContent(CurrentPage).Opacity = 0;
         PlacePageCapsule();
@@ -34,7 +39,15 @@ public partial class MainWindow
 
 internal sealed class RemindersPanel : Grid
 {
+    private readonly StackPanel _composer = new();
+    private Button? _reveal;
     private ContextMenu? _menu;
+
+    internal void DismissComposerOnOutsideClick()
+    {
+        if (!MenuOpen && !_composer.IsMouseOver && _reveal?.IsMouseOver != true)
+            _composer.Visibility = Visibility.Collapsed;
+    }
     internal bool MenuOpen => _menu?.IsOpen == true;
     private readonly ConnectionVault _vault = App.RemindersVault;
     private readonly PasswordBox _link = new() { Margin = new Thickness(0, 4, 0, 4) };
@@ -43,7 +56,7 @@ internal sealed class RemindersPanel : Grid
     private readonly TextBox _title = new();
     private readonly TextBox _due = new();
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
-    private readonly StackPanel _panel = new() { Margin = new Thickness(16) };
+    private readonly StackPanel _panel = new();
     private readonly CancellationToken _lifetime;
     private StoredConnection? _connection;
     private BridgeSnapshot? _snapshot;
@@ -72,14 +85,20 @@ internal sealed class RemindersPanel : Grid
         Children.Add(scroll);
 
         var footer = new StackPanel();
+        var bottomBar = new Grid { MinHeight = 26 };
+        footer.Children.Add(_panel);
+        footer.Children.Add(bottomBar);
         SetRow(footer, 2);
         Children.Add(footer);
-        footer.Children.Add(_panel);
-        footer.Children.Add(_status);
+        bottomBar.Children.Add(_status);
         _status.FontSize = 11;
+        _status.Margin = new Thickness(0);
+        _status.VerticalAlignment = VerticalAlignment.Center;
+        _status.HorizontalAlignment = HorizontalAlignment.Left;
         _status.SetResourceReference(TextBlock.ForegroundProperty, "PanelSecondary");
 
-        var composer = new StackPanel();
+        var composer = _composer;
+        composer.IsVisibleChanged += (_, _) => { if (!IsVisible) composer.Visibility = Visibility.Collapsed; };
         var create = new DockPanel();
         composer.Children.Add(create);
         var settings = new DockPanel();
@@ -151,7 +170,8 @@ internal sealed class RemindersPanel : Grid
         reveal.FontSize = 16;
         reveal.ToolTip = "新增待办";
         reveal.HorizontalAlignment = HorizontalAlignment.Center;
-        footer.Children.Insert(0, reveal);
+        _reveal = reveal;
+        bottomBar.Children.Add(reveal);
 
         void ToggleComposer()
         {
