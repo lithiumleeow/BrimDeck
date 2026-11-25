@@ -19,6 +19,7 @@ public partial class MainWindow
         if (RemindersHost.Child is null) RemindersHost.Child = new RemindersPanel(_app.Lifetime.Token);
         RemindersHost.Visibility = Visibility.Visible;
         PageContent(CurrentPage).Opacity = 0;
+        PlacePageCapsule();
         Activate();
     }
 
@@ -27,6 +28,7 @@ public partial class MainWindow
         if (RemindersHost.Visibility != Visibility.Visible) return;
         RemindersHost.Visibility = Visibility.Collapsed;
         PageContent(CurrentPage).Opacity = 1;
+        PlacePageCapsule();
     }
 }
 
@@ -77,15 +79,17 @@ internal sealed class RemindersPanel : Grid
         _status.FontSize = 11;
         _status.SetResourceReference(TextBlock.ForegroundProperty, "PanelSecondary");
 
+        var composer = new StackPanel();
         var create = new DockPanel();
+        composer.Children.Add(create);
         var settings = new DockPanel();
-        _panel.Children.Add(create);
+        _panel.Children.Add(composer);
         _panel.Children.Add(settings);
-        create.Visibility = settings.Visibility = Visibility.Collapsed;
+        composer.Visibility = settings.Visibility = Visibility.Collapsed;
         void Toggle(DockPanel panel)
         {
             var show = panel.Visibility != Visibility.Visible;
-            create.Visibility = settings.Visibility = Visibility.Collapsed;
+            composer.Visibility = settings.Visibility = Visibility.Collapsed;
             if (show) panel.Visibility = Visibility.Visible;
         }
 
@@ -105,7 +109,6 @@ internal sealed class RemindersPanel : Grid
             return item;
         }
 
-        actions.Children.Add(MakeButton("＋ 新增", () => { Toggle(create); if (create.IsVisible) _title.Focus(); return Task.CompletedTask; }));
         var more = MakeButton("⋯");
         more.ToolTip = "清单和设置";
         more.Click += (_, _) =>
@@ -130,26 +133,48 @@ internal sealed class RemindersPanel : Grid
         _link.ToolTip = "粘贴 Mac 桥接配置链接";
         settings.Children.Add(_link);
 
-        var add = MakeButton("添加", () => RunAsync(async () => { await CreateAsync(); create.Visibility = Visibility.Collapsed; }));
+        async Task SubmitAsync() => await RunAsync(async () => { await CreateAsync(); composer.Visibility = Visibility.Collapsed; });
+        var add = MakeButton("添加", SubmitAsync);
         DockPanel.SetDock(add, Dock.Right);
         create.Children.Add(add);
         _due.Width = 124;
         _due.ToolTip = "到期时间，可留空 · yyyy-MM-dd HH:mm";
         DockPanel.SetDock(_due, Dock.Right);
         create.Children.Add(_due);
-        var quick = MakeButton("时间 ▾");
-        DockPanel.SetDock(quick, Dock.Right);
-        create.Children.Add(quick);
-        quick.Click += (_, _) =>
+        var presets = new WrapPanel { Margin = new Thickness(0, 4, 0, 2) };
+        composer.Children.Add(presets);
+        var reveal = MakeButton("＋", () =>
         {
-            var presets = QuickTimes.Options(DateTimeOffset.Now, TimeZoneInfo.Local).Select(option =>
+            ToggleComposer();
+            return Task.CompletedTask;
+        });
+        reveal.FontSize = 16;
+        reveal.ToolTip = "新增待办";
+        reveal.HorizontalAlignment = HorizontalAlignment.Center;
+        footer.Children.Insert(0, reveal);
+
+        void ToggleComposer()
+        {
+            var show = composer.Visibility != Visibility.Visible;
+            composer.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            settings.Visibility = Visibility.Collapsed;
+            if (!show) return;
+            presets.Children.Clear();
+            presets.Children.Add(MakeButton("不设时间", () => { _due.Clear(); _title.Focus(); return Task.CompletedTask; }));
+            foreach (var option in QuickTimes.Options(DateTimeOffset.Now, TimeZoneInfo.Local))
             {
-                var item = Command($"{option.Label} · {option.Due:HH:mm}", () => _due.Text = option.Due?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "");
-                item.IsEnabled = option.Enabled;
-                return (Control)item;
-            });
-            OpenMenu(quick, presets.Prepend(Command("不设时间", () => _due.Clear())).ToArray());
-        };
+                var button = MakeButton($"{option.Label} {option.Due:HH:mm}", () =>
+                {
+                    _due.Text = option.Due?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "";
+                    _title.Focus();
+                    return Task.CompletedTask;
+                });
+                button.IsEnabled = option.Enabled;
+                presets.Children.Add(button);
+            }
+            _title.Focus();
+        }
+
         var destination = MakeButton("存入 ▾");
         DockPanel.SetDock(destination, Dock.Right);
         create.Children.Add(destination);
@@ -165,6 +190,15 @@ internal sealed class RemindersPanel : Grid
         };
         _title.ToolTip = "待办标题";
         create.Children.Add(_title);
+        foreach (var input in new[] { _title, _due })
+        {
+            input.PreviewKeyDown += async (_, args) =>
+            {
+                if (args.Key != System.Windows.Input.Key.Enter) return;
+                args.Handled = true;
+                if (IsEnabled) await SubmitAsync();
+            };
+        }
         foreach (Control field in new Control[] { _link, _title, _due })
         {
             field.Height = 24;

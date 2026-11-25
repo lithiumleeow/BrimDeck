@@ -99,6 +99,9 @@
                 <Button x:Name="DevicesPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="DevicesPage_Click">
                   <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 4.5,7 H 17 A 2,2 0 0 1 19,9 V 15 A 2,2 0 0 1 17,17 H 4.5 A 2,2 0 0 1 2.5,15 V 9 A 2,2 0 0 1 4.5,7 Z M 21.5,10.5 V 13.5 M 6.5,10.5 V 13.5 M 10,10.5 V 13.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox>
                 </Button>
+                <Button x:Name="RemindersPageButton" Style="{StaticResource PanelIconButton}" Width="28" Height="24" Margin="1,0,0,0" Click="Reminders_Click" ToolTip="&#x63D0;&#x9192;&#x4E8B;&#x9879;" AutomationProperties.Name="iCloud Reminders">
+                  <Viewbox Width="16" Height="16"><Canvas Width="24" Height="24"><Path Data="M 11,5 H 21 M 11,12 H 21 M 11,19 H 21 M 3,5 L 5,7 L 8,3 M 3,12 L 5,14 L 8,10 M 3,19 L 5,21 L 8,17" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.65" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/></Canvas></Viewbox>
+                </Button>
                  </StackPanel>
                  </Grid>
                 </Border>
@@ -110,7 +113,7 @@
                 <Grid x:Name="ToolbarActions" Margin="0,0,20,0">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Style="{StaticResource PanelIconButton}" Width="28" Height="24" Content="&#x2713;" ToolTip="iCloud &#x63D0;&#x9192;&#x4E8B;&#x9879;" Click="Reminders_Click"/>
+
                     <Button x:Name="MediaSourceButton" Style="{StaticResource PanelSourceButton}" Width="Auto" MaxWidth="150" Padding="8,0" Margin="0,0,2,0" Click="MediaSource_Click" Visibility="Collapsed">
                       <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
