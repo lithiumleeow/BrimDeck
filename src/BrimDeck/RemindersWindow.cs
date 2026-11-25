@@ -6,50 +6,68 @@ namespace BrimDeck;
 
 public partial class MainWindow
 {
-    private RemindersWindow? _remindersWindow;
-
     private void Reminders_Click(object sender, RoutedEventArgs e)
     {
-        if (_remindersWindow is { IsVisible: true })
+        if (RemindersHost.Visibility == Visibility.Visible)
         {
-            _remindersWindow.Activate();
+            CloseRemindersPage();
             return;
         }
 
-        _remindersWindow = new RemindersWindow();
-        _remindersWindow.Show();
+        if (RemindersHost.Child is null) RemindersHost.Child = new RemindersPanel(_app.Lifetime.Token);
+        RemindersHost.Visibility = Visibility.Visible;
+        PageContent(CurrentPage).Opacity = 0;
+        Activate();
+    }
+
+    private void CloseRemindersPage()
+    {
+        if (RemindersHost.Visibility != Visibility.Visible) return;
+        RemindersHost.Visibility = Visibility.Collapsed;
+        PageContent(CurrentPage).Opacity = 1;
     }
 }
 
-internal sealed class RemindersWindow : Window
+internal sealed class RemindersPanel : Grid
 {
     private readonly ConnectionVault _vault = App.RemindersVault;
     private readonly PasswordBox _link = new() { Margin = new Thickness(0, 4, 0, 4) };
     private readonly ComboBox _lists = new() { DisplayMemberPath = nameof(BridgeList.title), Margin = new Thickness(0, 4, 0, 4) };
-    private readonly ListBox _tasks = new() { Height = 250, DisplayMemberPath = nameof(BridgeTodo.title) };
+    private readonly ListBox _tasks = new() { DisplayMemberPath = nameof(BridgeTodo.title) };
     private readonly TextBox _title = new();
     private readonly TextBox _due = new();
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
     private readonly StackPanel _panel = new() { Margin = new Thickness(16) };
-    private readonly CancellationTokenSource _lifetime = new();
+    private readonly CancellationToken _lifetime;
     private StoredConnection? _connection;
     private BridgeSnapshot? _snapshot;
     private CreateRequest? _pendingCreate;
 
-    internal RemindersWindow()
+    internal RemindersPanel(CancellationToken lifetime)
     {
-        Title = "iCloud 提醒事项";
-        Width = 470;
-        SizeToContent = SizeToContent.Height;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Content = _panel;
+        _lifetime = lifetime;
+        var actions = _panel;
+        var list = new DockPanel { Margin = new Thickness(12, 4, 4, 8) };
+        DockPanel.SetDock(_lists, Dock.Top);
+        list.Children.Add(_lists);
+        list.Children.Add(_tasks);
+
+        ColumnDefinitions.Add(new ColumnDefinition());
+        ColumnDefinitions.Add(new ColumnDefinition());
+        Children.Add(list);
+        var scroll = new ScrollViewer { Content = actions, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        SetColumn(scroll, 1);
+        Children.Add(scroll);
+        _status.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary");
+
+        actions.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary");
 
         _panel.Children.Add(new TextBlock { Text = "粘贴 Mac 桥接配置链接" });
         _panel.Children.Add(_link);
         AddButton("连接并保存", ConnectAsync);
         AddButton("刷新", RefreshAsync);
-        _panel.Children.Add(_lists);
-        _panel.Children.Add(_tasks);
+
+
         AddButton("完成选中待办", CompleteAsync);
         _panel.Children.Add(new TextBlock { Text = "新待办标题" });
         _panel.Children.Add(_title);
@@ -63,7 +81,7 @@ internal sealed class RemindersWindow : Window
             _connection = _vault.Load();
             if (_connection is not null) await RefreshAsync();
         });
-        Closed += (_, _) => _lifetime.Cancel();
+
     }
 
     private void AddButton(string label, Func<Task> action)
@@ -86,7 +104,7 @@ internal sealed class RemindersWindow : Window
     {
         var connection = BridgeConnection.Parse(_link.Password);
         using var reader = new BridgeReader(connection);
-        var snapshot = await reader.ReadAsync(_lifetime.Token);
+        var snapshot = await reader.ReadAsync(_lifetime);
         var saved = new StoredConnection(connection.Address.AbsoluteUri, connection.Token);
         _vault.Save(saved);
         _connection = saved;
@@ -101,7 +119,7 @@ internal sealed class RemindersWindow : Window
     private async Task RefreshAsync()
     {
         using var reader = OpenReader();
-        SetSnapshot(await reader.ReadAsync(_lifetime.Token));
+        SetSnapshot(await reader.ReadAsync(_lifetime));
     }
 
     private void SetSnapshot(BridgeSnapshot snapshot)
@@ -128,7 +146,7 @@ internal sealed class RemindersWindow : Window
         if (_tasks.SelectedItem is not BridgeTodo item)
             throw new InvalidOperationException("请选择一条待办。");
         using var reader = OpenReader();
-        await reader.CompleteAsync(item, _lifetime.Token);
+        await reader.CompleteAsync(item, _lifetime);
         _tasks.ItemsSource = ((IEnumerable<BridgeTodo>)_tasks.ItemsSource).Where(x => x != item).ToArray();
         await RefreshAsync();
     }
@@ -151,7 +169,7 @@ internal sealed class RemindersWindow : Window
             request = pending;
         _pendingCreate = request;
         using var reader = OpenReader();
-        await reader.CreateAsync(request, _lifetime.Token);
+        await reader.CreateAsync(request, _lifetime);
         _pendingCreate = null;
         _title.Clear();
         _due.Clear();
