@@ -25,7 +25,17 @@ public partial class MainWindow
         RemindersHost.Visibility = Visibility.Visible;
         PageContent(CurrentPage).Opacity = 0;
         PlacePageCapsule();
-        Activate();
+
+    }
+
+    internal void FocusReminderField(Control field)
+    {
+        if (!_expanded || !field.IsVisible || !field.IsEnabled || !PanelKeys.Take()) return;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
+        {
+            if (!_expanded || !IsActive || !field.IsVisible || !field.IsEnabled) return;
+            System.Windows.Input.Keyboard.Focus(field);
+        });
     }
 
     private void CloseRemindersPage()
@@ -143,7 +153,7 @@ internal sealed partial class RemindersPanel : Grid
             }
             var refresh = new MenuItem { Header = "刷新" };
             refresh.Click += async (_, _) => await RunAsync(RefreshAsync);
-            OpenMenu(more, lists, refresh, Command(_app.ReminderSummaryEnabled ? "隐藏胶囊摘要" : "显示胶囊摘要", _app.ToggleReminderSummary), Command("连接设置", () => { Toggle(settings); if (settings.IsVisible) _link.Focus(); }));
+            OpenMenu(more, lists, refresh, Command(_app.ReminderSummaryEnabled ? "隐藏胶囊摘要" : "显示胶囊摘要", _app.ToggleReminderSummary), Command("连接设置", () => { Toggle(settings); if (settings.IsVisible) FocusReminderInput(_link); }));
         };
         actions.Children.Add(more);
 
@@ -181,19 +191,19 @@ internal sealed partial class RemindersPanel : Grid
             settings.Visibility = Visibility.Collapsed;
             if (!show) return;
             presets.Children.Clear();
-            presets.Children.Add(MakeButton("不设时间", () => { _due.Clear(); _title.Focus(); return Task.CompletedTask; }));
+            presets.Children.Add(MakeButton("不设时间", () => { _due.Clear(); FocusReminderInput(_title); return Task.CompletedTask; }));
             foreach (var option in QuickTimes.Options(DateTimeOffset.Now, TimeZoneInfo.Local))
             {
                 var button = MakeButton($"{option.Label} {option.Due:HH:mm}", () =>
                 {
                     _due.Text = option.Due?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "";
-                    _title.Focus();
+                    FocusReminderInput(_title);
                     return Task.CompletedTask;
                 });
                 button.IsEnabled = option.Enabled;
                 presets.Children.Add(button);
             }
-            _title.Focus();
+            FocusReminderInput(_title);
         }
 
         var destination = MakeButton("存入 ▾");
@@ -222,6 +232,7 @@ internal sealed partial class RemindersPanel : Grid
         }
         foreach (Control field in new Control[] { _link, _title, _due })
         {
+            WireReminderInput(field);
             field.Height = 24;
             field.Margin = new Thickness(2);
             field.SetResourceReference(Control.BackgroundProperty, "PanelSwitchFill");
@@ -243,6 +254,17 @@ internal sealed partial class RemindersPanel : Grid
         });
 
     }
+
+    private static void FocusReminderInput(Control field)
+    {
+        if (Window.GetWindow(field) is MainWindow window) window.FocusReminderField(field);
+    }
+
+    private static void WireReminderInput(Control field) =>
+        field.PreviewMouseLeftButtonDown += (_, _) =>
+        {
+            if (!field.IsKeyboardFocusWithin) FocusReminderInput(field);
+        };
 
     private static Button MakeButton(string label, Func<Task>? action = null)
     {

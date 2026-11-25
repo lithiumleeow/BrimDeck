@@ -72,6 +72,7 @@ internal sealed partial class RemindersPanel
         var editor = new StackPanel { Margin = new Thickness(28, 3, 4, 8) };
         _editor = editor;
         var title = new TextBox { Text = item.title, Margin = new Thickness(0, 0, 0, 4) };
+        WireReminderInput(title);
         editor.Children.Add(title);
         var options = new WrapPanel();
         editor.Children.Add(options);
@@ -85,7 +86,7 @@ internal sealed partial class RemindersPanel
             kind = choice;
             due = value;
             selection.Text = label;
-            title.Focus();
+            FocusReminderInput(title);
         }
         if (!item.recurring)
         {
@@ -112,7 +113,7 @@ internal sealed partial class RemindersPanel
         }));
         title.PreviewKeyDown += async (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; await SaveAsync(); } };
         _tasks.Children.Insert(_tasks.Children.IndexOf(row) + 1, editor);
-        title.Focus();
+        FocusReminderInput(title);
         title.SelectAll();
         editor.BringIntoView();
     }
