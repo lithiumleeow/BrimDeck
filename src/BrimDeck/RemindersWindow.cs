@@ -233,7 +233,9 @@ internal sealed partial class RemindersPanel : Grid
         foreach (Control field in new Control[] { _link, _title, _due })
         {
             WireReminderInput(field);
-            field.Height = 24;
+            field.MinHeight = 28;
+            field.Padding = new Thickness(6, 2, 6, 2);
+            field.VerticalContentAlignment = VerticalAlignment.Center;
             field.Margin = new Thickness(2);
             field.SetResourceReference(Control.BackgroundProperty, "PanelSwitchFill");
             field.SetResourceReference(Control.ForegroundProperty, "PanelPrimary");
