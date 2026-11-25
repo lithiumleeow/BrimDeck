@@ -46,6 +46,7 @@ internal sealed class RemindersPanel : Grid
     private StoredConnection? _connection;
     private BridgeSnapshot? _snapshot;
     private CreateRequest? _pendingCreate;
+    private string? _destination;
 
     internal RemindersPanel(CancellationToken lifetime)
     {
@@ -60,24 +61,9 @@ internal sealed class RemindersPanel : Grid
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         DockPanel.SetDock(actions, Dock.Right);
         toolbar.Children.Add(actions);
-        var listPicker = MakeButton("全部清单 ▾");
-        listPicker.HorizontalAlignment = HorizontalAlignment.Left;
-        listPicker.Click += (_, _) =>
-        {
-            if (_lists.Items.Count == 0) return;
-            var menu = new ContextMenu { PlacementTarget = listPicker };
-            foreach (BridgeList list in _lists.Items)
-            {
-                var item = new MenuItem { Header = list.title, IsChecked = list == _lists.SelectedItem, IsCheckable = true };
-                item.Click += (_, _) => _lists.SelectedItem = list;
-                menu.Items.Add(item);
-            }
-            _menu = menu;
-            listPicker.ContextMenu = menu;
-            menu.IsOpen = true;
-        };
-        _lists.SelectionChanged += (_, _) => listPicker.Content = ((_lists.SelectedItem as BridgeList)?.title ?? "全部清单") + " ▾";
-        toolbar.Children.Add(listPicker);
+        var caption = new TextBlock { Text = "提醒事项", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+        caption.SetResourceReference(TextBlock.ForegroundProperty, "PanelPrimary");
+        toolbar.Children.Add(caption);
 
         var scroll = new ScrollViewer { Content = _tasks, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         SetRow(scroll, 1);
@@ -103,9 +89,40 @@ internal sealed class RemindersPanel : Grid
             if (show) panel.Visibility = Visibility.Visible;
         }
 
-        actions.Children.Add(MakeButton("刷新", () => RunAsync(RefreshAsync)));
+        void OpenMenu(Button anchor, params Control[] entries)
+        {
+            var menu = new ContextMenu { PlacementTarget = anchor };
+            foreach (var entry in entries) menu.Items.Add(entry);
+            _menu = menu;
+            anchor.ContextMenu = menu;
+            menu.IsOpen = true;
+        }
+
+        MenuItem Command(string title, Action handler)
+        {
+            var item = new MenuItem { Header = title };
+            item.Click += (_, _) => handler();
+            return item;
+        }
+
         actions.Children.Add(MakeButton("＋ 新增", () => { Toggle(create); if (create.IsVisible) _title.Focus(); return Task.CompletedTask; }));
-        actions.Children.Add(MakeButton("连接", () => { Toggle(settings); if (settings.IsVisible) _link.Focus(); return Task.CompletedTask; }));
+        var more = MakeButton("⋯");
+        more.ToolTip = "清单和设置";
+        more.Click += (_, _) =>
+        {
+            var lists = new MenuItem { Header = "筛选清单", IsEnabled = _lists.Items.Count > 0 };
+            foreach (BridgeList list in _lists.Items)
+            {
+                var item = Command(list.title, () => _lists.SelectedItem = list);
+                item.IsCheckable = true;
+                item.IsChecked = list == _lists.SelectedItem;
+                lists.Items.Add(item);
+            }
+            var refresh = new MenuItem { Header = "刷新" };
+            refresh.Click += async (_, _) => await RunAsync(RefreshAsync);
+            OpenMenu(more, lists, refresh, Command("连接设置", () => { Toggle(settings); if (settings.IsVisible) _link.Focus(); }));
+        };
+        actions.Children.Add(more);
 
         var save = MakeButton("保存连接", () => RunAsync(async () => { await ConnectAsync(); settings.Visibility = Visibility.Collapsed; }));
         DockPanel.SetDock(save, Dock.Right);
@@ -120,6 +137,32 @@ internal sealed class RemindersPanel : Grid
         _due.ToolTip = "到期时间，可留空 · yyyy-MM-dd HH:mm";
         DockPanel.SetDock(_due, Dock.Right);
         create.Children.Add(_due);
+        var quick = MakeButton("时间 ▾");
+        DockPanel.SetDock(quick, Dock.Right);
+        create.Children.Add(quick);
+        quick.Click += (_, _) =>
+        {
+            var presets = QuickTimes.Options(DateTimeOffset.Now, TimeZoneInfo.Local).Select(option =>
+            {
+                var item = Command($"{option.Label} · {option.Due:HH:mm}", () => _due.Text = option.Due?.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture) ?? "");
+                item.IsEnabled = option.Enabled;
+                return (Control)item;
+            });
+            OpenMenu(quick, presets.Prepend(Command("不设时间", () => _due.Clear())).ToArray());
+        };
+        var destination = MakeButton("存入 ▾");
+        DockPanel.SetDock(destination, Dock.Right);
+        create.Children.Add(destination);
+        destination.Click += (_, _) =>
+        {
+            var options = (_snapshot?.Lists ?? []).Where(list => list.writable)
+                .Select(list => (Control)Command(list.title, () =>
+                {
+                    _destination = list.id;
+                    destination.Content = list.title;
+                })).ToArray();
+            if (options.Length > 0) OpenMenu(destination, options);
+        };
         _title.ToolTip = "待办标题";
         create.Children.Add(_title);
         foreach (Control field in new Control[] { _link, _title, _due })
@@ -195,10 +238,23 @@ internal sealed class RemindersPanel : Grid
         string? id = (_lists.SelectedItem as BridgeList)?.id;
         var tasks = _snapshot.Todos.Where(x => string.IsNullOrEmpty(id) || x.calendarId == id).ToArray();
         _tasks.Children.Clear();
-        foreach (var item in tasks)
+        string? previousGroup = null;
+        foreach (var (group, item) in TodoOrdering.ByDate(tasks, TodoSort.Due, DateTimeOffset.Now, TimeZoneInfo.Local))
         {
+            if (group != previousGroup)
+            {
+                var heading = new TextBlock { Text = group, FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 0, 3) };
+                heading.SetResourceReference(TextBlock.ForegroundProperty, "PanelSecondary");
+                _tasks.Children.Add(heading);
+                previousGroup = group;
+            }
             var row = new DockPanel { Margin = new Thickness(0, 1, 4, 1), LastChildFill = true };
-            var complete = MakeButton("○", () => RunAsync(() => CompleteAsync(item)));
+            var complete = new CheckBox { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
+            complete.Checked += async (_, _) =>
+            {
+                try { await RunAsync(() => CompleteAsync(item)); }
+                finally { complete.IsChecked = false; }
+            };
             complete.ToolTip = "标记完成";
             complete.IsEnabled = TaskWrites.CanComplete(item);
             DockPanel.SetDock(complete, Dock.Left);
@@ -227,8 +283,10 @@ internal sealed class RemindersPanel : Grid
 
     private async Task CreateAsync()
     {
-        if (_lists.SelectedItem is not BridgeList { writable: true } list)
-            throw new InvalidOperationException("请选择一个可写的清单。");
+        var list = _snapshot?.Lists.FirstOrDefault(item => item.writable && item.id == _destination)
+            ?? _lists.SelectedItem as BridgeList;
+        if (list?.writable != true) list = _snapshot?.Lists.FirstOrDefault(item => item.writable);
+        if (list is null) throw new InvalidOperationException("没有可写清单，请先连接并刷新。");
         DateTimeOffset? due = null;
         if (!string.IsNullOrWhiteSpace(_due.Text))
         {
