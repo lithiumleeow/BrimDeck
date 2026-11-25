@@ -141,6 +141,16 @@ public sealed class TrayIcon : IDisposable
         var quit = new MenuItem { Header = Loc.T("退出", "Exit") }; quit.Click += (_, _) => exit(); menu.Items.Add(quit);
         return menu;
     }
+    internal bool ShowReminder(string message)
+    {
+        if (_disposed) return false;
+        var notice = _data;
+        notice.Flags = 0x10; // NIF_INFO
+        notice.InfoTitle = "iCloud Reminders";
+        notice.Info = message.Length > 255 ? message[..255] : message;
+        notice.InfoFlags = 1; // NIIF_INFO
+        return Shell_NotifyIcon(1, ref notice);
+    }
     public void Dispose() { _disposed = true; _retry.Stop(); Shell_NotifyIcon(2, ref _data); _source.RemoveHook(Hook); if (_ownsIcon) DestroyIcon(_data.Icon); }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct NOTIFYICONDATA
     {
